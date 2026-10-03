@@ -284,7 +284,7 @@ function buildResourceVersionCandidates({ serverKey, detectedResourceVersion }) 
     candidates.push(detectedResourceVersion);
   }
 
-  for (let patch = 260; patch >= 180; patch -= 1) {
+  for (let patch = 400; patch >= 180; patch -= 1) {
     candidates.push(`0.16.${patch}`);
   }
 
@@ -295,7 +295,12 @@ function buildResourceVersionCandidates({ serverKey, detectedResourceVersion }) 
 
 function isVersionStringError(error) {
   const message = error?.message || String(error);
-  return message.includes('version_str') || message.includes('client_version_string');
+  return (
+    message.includes('version_str') ||
+    message.includes('client_version_string') ||
+    message.includes('ERR_CLIENT_VERSION') ||
+    /"code"\s*:\s*151\b/.test(message)
+  );
 }
 
 function buildRoutesUrl(gatewayUrl, version, lang) {
