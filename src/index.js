@@ -443,7 +443,12 @@ async function loadServerContext(server) {
     'liqi prefix missing from resversion manifest'
   );
   console.log(`liqi prefix: ${liqiPrefix}`);
-  const liqiVersion = normalizeResourceVersion(liqiPrefix);
+  const liqiVersion = String(liqiPrefix)
+    .trim()
+    .replace(/^WebGL_2022-/, '')
+    .replace(/^web-/, '')
+    .replace(/^v/, '')
+    .replace(/\.w$/, '');
 
   const gatewayUrl = must(
     config?.ip?.find(entry => Array.isArray(entry?.gateways) && entry.gateways.length)?.gateways?.[0]?.url,
