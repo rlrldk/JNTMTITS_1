@@ -611,7 +611,14 @@ async function openChannel(endpoint, origin, Wrapper) {
       }
 
       await new Promise(resolve => {
-        ws.once('close', resolve);
+        const timeout = setTimeout(() => {
+          ws.terminate();
+          resolve();
+        }, 3000);
+        ws.once('close', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
         ws.close();
       });
     }
@@ -923,6 +930,7 @@ async function run() {
     await runActions(session);
   } finally {
     await session.close();
+    console.log('session closed');
   }
 }
 
