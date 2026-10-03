@@ -217,10 +217,13 @@ function compareDottedVersions(a, b) {
 }
 
 function extractResourceVersion(text) {
-  const versions = [...String(text || '').matchAll(/\b0\.\d+\.\d+\b/g)].map(match => match[0]);
+  const source = String(text || '');
+  const versions = [...source.matchAll(/(?:WebGL_2022-|\b)(0\.\d+\.\d+)(?:\.w\b|\b)/gi)].map(match => match[1]);
 
   if (!versions.length) {
-    return null;
+    try {
+      return getResourceVersionFromPayload(JSON.parse(source));
+    } catch { return null; }
   }
 
   return [...new Set(versions)].sort(compareDottedVersions).at(-1);
@@ -322,27 +325,41 @@ function buildUpgradeInfoUrl(gatewayUrl, version, lang) {
   return url;
 }
 
-async function resolveResourceVersion(server, { gatewayUrl, productVersion, routeLang } = {}) {
+function getResourceVersionSources(server, { gatewayUrl, productVersion, routeLang, liqiVersion } = {}) {
   const sources = [];
-
-  if (gatewayUrl && productVersion) {
-    sources.push({
-      name: 'clientgate upgrade_info',
-      url: buildUpgradeInfoUrl(gatewayUrl, productVersion, routeLang)
-    });
+  if (gatewayUrl) {
+    // upgrade_info is keyed by the Liqi resource prefix. Unity's productVersion
+    // (for example 4.0.12) is a package version and is only a legacy fallback.
+    for (const version of [...new Set([liqiVersion, productVersion].filter(Boolean))]) {
+      sources.push({
+        name: `clientgate upgrade_info (${version})`,
+        url: buildUpgradeInfoUrl(gatewayUrl, version, routeLang)
+      });
+    }
   }
-
   const releaseUrl = RESOURCE_RELEASE_URLS[server.key];
-
   if (releaseUrl) {
     const url = new URL(releaseUrl);
     url.searchParams.set('randv', buildRandv());
-
-    sources.push({
-      name: 'warehouse release',
-      url
-    });
+    sources.push({ name: 'warehouse release', url });
   }
+  return sources;
+}
+
+function getResourceVersionFromPayload(value) {
+  if (typeof value === 'string') {
+    return value.match(/(?:WebGL_2022-|\b)(0\.\d+\.\d+)(?:\.w\b|\b)/i)?.[1] || null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = getResourceVersionFromPayload(item); if (found) return found; }
+  } else if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) { const found = getResourceVersionFromPayload(item); if (found) return found; }
+  }
+  return null;
+}
+
+async function resolveResourceVersion(server, { gatewayUrl, productVersion, routeLang, liqiVersion } = {}) {
+  const sources = getResourceVersionSources(server, { gatewayUrl, productVersion, routeLang, liqiVersion });
 
   for (const source of sources) {
     try {
@@ -426,6 +443,7 @@ async function loadServerContext(server) {
     'liqi prefix missing from resversion manifest'
   );
   console.log(`liqi prefix: ${liqiPrefix}`);
+  const liqiVersion = normalizeResourceVersion(liqiPrefix);
 
   const gatewayUrl = must(
     config?.ip?.find(entry => Array.isArray(entry?.gateways) && entry.gateways.length)?.gateways?.[0]?.url,
@@ -435,7 +453,8 @@ async function loadServerContext(server) {
   const detectedResourceVersion = await resolveResourceVersion(server, {
     gatewayUrl,
     productVersion,
-    routeLang
+    routeLang,
+    liqiVersion
   });
 
   const resourceVersionCandidates = buildResourceVersionCandidates({
@@ -906,6 +925,9 @@ if (require.main === module) {
 
 module.exports = {
   createSession,
+  extractResourceVersion,
+  getResourceVersionFromPayload,
+  getResourceVersionSources,
   getServerConfig,
   loadRuntimeConfig,
   loadServerContext,
