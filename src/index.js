@@ -265,7 +265,11 @@ function saveSuccessfulResourceVersion(serverKey, resourceVersion) {
   console.log(`resource version cache saved -> ${serverKey}: ${resourceVersion}`);
 }
 
-function buildResourceVersionCandidates({ serverKey, detectedResourceVersion }) {
+// Keep this list short: every candidate is a full login attempt per gateway route.
+const MAX_RESOURCE_VERSION_CANDIDATES = 8;
+const FALLBACK_RESOURCE_VERSIONS = ['0.16.400', '0.16.193'];
+
+function buildResourceVersionCandidates({ serverKey, detectedResourceVersion, productVersion }) {
   const cache = readResourceVersionCache();
   const cachedResourceVersion = cache[serverKey];
   const overrideResourceVersion = getOverrideResourceVersion();
@@ -284,13 +288,19 @@ function buildResourceVersionCandidates({ serverKey, detectedResourceVersion }) 
     candidates.push(detectedResourceVersion);
   }
 
-  for (let patch = 400; patch >= 180; patch -= 1) {
-    candidates.push(`0.16.${patch}`);
+  candidates.push(...FALLBACK_RESOURCE_VERSIONS);
+
+  // Upstream (4n3u) scheme: resource = Unity productVersion, e.g. 4.0.18
+  if (productVersion) {
+    candidates.push(productVersion);
   }
 
-  candidates.push('0.16.193');
+  return [...new Set(candidates.filter(Boolean))].slice(0, MAX_RESOURCE_VERSION_CANDIDATES);
+}
 
-  return [...new Set(candidates.filter(Boolean))];
+function isTokenExpiredError(error) {
+  const message = error?.message || String(error);
+  return message.includes('oauth2Auth failed') && /"code"\s*:\s*110\b/.test(message);
 }
 
 function isVersionStringError(error) {
@@ -469,7 +479,8 @@ async function loadServerContext(server) {
 
   const resourceVersionCandidates = buildResourceVersionCandidates({
     serverKey: server.key,
-    detectedResourceVersion
+    detectedResourceVersion,
+    productVersion
   });
 
   console.log(`version.json -> version=${version} force_version=${versionInfo.force_version} code=${versionInfo.code}`);
@@ -764,6 +775,14 @@ async function createSessionWithRoutes(context, credentials) {
     try {
       return await createSessionForRoute(context, route, credentials);
     } catch (error) {
+      if (isTokenExpiredError(error)) {
+        fail(
+          'TOKEN이 만료됐거나 무효입니다 (oauth2Auth ERR_OAUTH2_FAILED, code 110). ' +
+            '브라우저 콘솔에서 UID/TOKEN을 다시 발급받아 GitHub Secrets를 갱신하세요. ' +
+            `원본 에러: ${error?.message || error}`
+        );
+      }
+
       errors.push({ route: route.id, message: error?.message || String(error) });
       console.warn(`gateway route ${route.id} failed: ${error?.message || error}`);
     }
